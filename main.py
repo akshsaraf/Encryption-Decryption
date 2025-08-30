@@ -3,6 +3,7 @@ import string
 import hashlib
 import base64
 import json
+import os
 
 
 class PureHybridCrypto:
@@ -10,11 +11,10 @@ class PureHybridCrypto:
         self.key = key
         self.rounds = rounds
         self.salt_len = salt_len
-        self.salt = None  # stored during encryption for consistency
+        self.salt = None
 
     # === XOR Helper ===
     def _get_xor_key(self, length, salt=""):
-        # Mix salt into key derivation for stronger variability
         hash_bytes = hashlib.sha256((self.key + salt).encode()).digest()
         return [b for b in hash_bytes[:length]]
 
@@ -23,7 +23,7 @@ class PureHybridCrypto:
         return ''.join(chr(ord(c) ^ key_bytes[i % len(key_bytes)]) for i, c in enumerate(text))
 
     def _xor_decrypt(self, text, salt=""):
-        return self._xor_encrypt(text, salt)  # XOR is symmetric
+        return self._xor_encrypt(text, salt)  # symmetric
 
     # === Salt Handling ===
     def _add_salt(self, text):
@@ -59,7 +59,6 @@ class PureHybridCrypto:
             pattern = self._generate_pattern(len(text), r)
             text = self._shuffle(text, pattern)
         text = self._xor_encrypt(text, self.salt)
-        # Encode safely with Base64
         return base64.urlsafe_b64encode(text.encode("utf-8")).decode("utf-8")
 
     def decrypt(self, encrypted_b64):
@@ -69,6 +68,39 @@ class PureHybridCrypto:
             pattern = self._generate_pattern(len(text), r)
             text = self._unshuffle(text, pattern)
         return self._remove_salt(text)
+
+    # === File Encryption/Decryption ===
+    def encrypt_file(self, input_path, output_path):
+        with open(input_path, "rb") as f:
+            raw_bytes = f.read()
+
+        # Convert file bytes → base64 string
+        text = base64.b64encode(raw_bytes).decode("utf-8")
+
+        # Encrypt
+        encrypted = self.encrypt(text)
+
+        # Save salt + ciphertext together
+        package = json.dumps({"s": self.salt, "d": encrypted})
+        with open(output_path, "w") as f:
+            f.write(package)
+
+    def decrypt_file(self, input_path, output_path):
+        with open(input_path, "r") as f:
+            package = json.loads(f.read())
+
+        # restore salt
+        self.salt = package["s"]
+        encrypted = package["d"]
+
+        # Decrypt
+        decrypted_text = self.decrypt(encrypted)
+
+        # Base64 decode back to raw bytes
+        raw_bytes = base64.b64decode(decrypted_text.encode("utf-8"))
+
+        with open(output_path, "wb") as f:
+            f.write(raw_bytes)
 
 
 # === Utility to Randomize Config ===
@@ -98,7 +130,7 @@ STATIC_KEY = "CladSecureKey2025"
 STATIC_CRYPTO = PureHybridCrypto(STATIC_KEY, rounds=1, salt_len=4)
 
 def encrypt_with_double_layer(text):
-    bundle_json = encrypt_with_config(text)  # dynamic encryption
+    bundle_json = encrypt_with_config(text)
     integrity = hashlib.sha256(bundle_json.encode()).hexdigest()[:16]
     package = json.dumps({"b": bundle_json, "i": integrity})
     return STATIC_CRYPTO.encrypt(package)
@@ -108,7 +140,6 @@ def decrypt_with_double_layer(encrypted_text):
     package = json.loads(decrypted_once)
     bundle_json, integrity = package["b"], package["i"]
 
-    # integrity check
     calc_hash = hashlib.sha256(bundle_json.encode()).hexdigest()[:16]
     if calc_hash != integrity:
         raise ValueError("❌ Integrity check failed!")
@@ -117,12 +148,27 @@ def decrypt_with_double_layer(encrypted_text):
 
 # === Demo ===
 if __name__ == "__main__":
-    text = input("Text to Encrypt: ")
-    print("🔓 Original:", text)
+    choice = input("Encrypt text (t) or file (f)? ")
 
-    encrypted_final = encrypt_with_double_layer(text)
-    print("📦 Double Encrypted:", encrypted_final)
+    if choice.lower() == "t":
+        text = input("Text to Encrypt: ")
+        encrypted_final = encrypt_with_double_layer(text)
+        print("📦 Double Encrypted:", encrypted_final)
 
-    bundle_new = input("Text to Decrypt: ")
-    decrypted = decrypt_with_double_layer(bundle_new)
-    print("✅ Decrypted:", decrypted)
+        bundle_new = input("Text to Decrypt: ")
+        decrypted = decrypt_with_double_layer(bundle_new)
+        print("✅ Decrypted:", decrypted)
+
+    elif choice.lower() == "f":
+        mode = input("Encrypt (e) or Decrypt (d) file? ")
+        in_file = input("Input file path: ")
+        out_file = input("Output file path: ")
+
+        crypto = PureHybridCrypto("FileKey2025", rounds=3, salt_len=4)
+
+        if mode == "e":
+            crypto.encrypt_file(in_file, out_file)
+            print(f"✅ File encrypted → {out_file}")
+        else:
+            crypto.decrypt_file(in_file, out_file)
+            print(f"✅ File decrypted → {out_file}")
