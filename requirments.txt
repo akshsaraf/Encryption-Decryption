@@ -1,0 +1,7 @@
+# PureHybridCrypto - Python Hybrid Encryption Library
+# Requires Python 3.6 or higher
+
+# Standard libraries used (no external packages required):
+# random, string, hashlib, base64, json, os
+# These are included with Python by default, so no installation needed.
+python>=3.6
